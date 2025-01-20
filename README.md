@@ -1,6 +1,6 @@
 Setup Guide
-curl https://github.com/Merodicoexe/Mutl-Installator/blob/main/install.sh
-sh install.sh
+bash <(curl -s https://raw.githubusercontent.com/Merodicoexe/Mutl-Installator/refs/heads/main/install.sh)
+
 
 List Program Install
 - phpMyAdmin + MariaDB
