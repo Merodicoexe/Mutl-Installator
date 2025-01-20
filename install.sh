@@ -10,7 +10,7 @@ echo -e "\033[1;32m
 \033[0m"
 
 echo "1. Install phpMyAdmin + MariaDB"
-echo "2. Pterodactyl (not supported)"
+echo "2. Pterodactyl (Supported)"
 echo "3. Install Web (Nginx or Apache2)"
 echo "4. Install PHP"
 echo "5. Install Node.js"
@@ -21,13 +21,100 @@ read -p "Select an option [1-6]: " option
 case $option in
 1)
     echo "Installing phpMyAdmin and MariaDB..."
-    sudo apt update
-    sudo apt install -y mariadb-server phpmyadmin
+    bash <(curl -s https://raw.githubusercontent.com/JulianGransee/PHPMyAdminInstaller/main/install.sh)
     echo "phpMyAdmin and MariaDB installation complete!"
     ;;
 2)
     clear
-    echo "Pterodactyl installation is not supported at the moment."
+    echo "Installing Pterodactyl..."
+    apt -y install software-properties-common curl apt-transport-https ca-certificates gnupg
+    LC_ALL=C.UTF-8 add-apt-repository -y ppa:ondrej/php
+    apt update
+    apt -y install php8.3 php8.3-{common,cli,gd,mysql,mbstring,bcmath,xml,fpm,curl,zip} mariadb-server tar unzip git
+    curl -sS https://getcomposer.org/installer | sudo php -- --install-dir=/usr/local/bin --filename=composer
+    mkdir -p /var/www/pterodactyl
+    cd /var/www/pterodactyl
+    curl -Lo panel.tar.gz https://github.com/pterodactyl/panel/releases/latest/download/panel.tar.gz
+    tar -xzvf panel.tar.gz
+    chmod -R 755 storage/* bootstrap/cache/
+
+    echo "Creating Pterodactyl Database..."
+    mysql -e "CREATE USER 'pterodactyl'@'127.0.0.1' IDENTIFIED BY '<password>';"
+    mysql -e "CREATE DATABASE panel;"
+    mysql -e "GRANT ALL PRIVILEGES ON panel.* TO 'pterodactyl'@'127.0.0.1' WITH GRANT OPTION;"
+
+    cp .env.example .env
+    COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader
+    php artisan key:generate --force
+    php artisan p:environment:setup
+    php artisan p:environment:database
+    php artisan migrate --seed --force
+    php artisan p:user:make
+    chown -R www-data:www-data /var/www/pterodactyl/*
+
+    echo "Configuring Pterodactyl Queue Worker..."
+    echo "* * * * * php /var/www/pterodactyl/artisan schedule:run >> /dev/null 2>&1" | sudo crontab -e
+
+    echo "Creating Pterodactyl Queue Worker Service..."
+    sudo bash -c 'cat <<EOF > /etc/systemd/system/pteroq.service
+# Pterodactyl Queue Worker File
+# ----------------------------------
+
+[Unit]
+Description=Pterodactyl Queue Worker
+After=redis-server.service
+
+[Service]
+User=www-data
+Group=www-data
+Restart=always
+ExecStart=/usr/bin/php /var/www/pterodactyl/artisan queue:work --queue=high,standard,low --sleep=3 --tries=3
+StartLimitInterval=180
+StartLimitBurst=30
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF'
+
+    sudo systemctl enable --now pteroq.service
+
+    echo "Configure Web Server for Pterodactyl:"
+    echo "1. Nginx With SSL"
+    echo "2. Nginx Without SSL"
+    echo "3. Apache With SSL"
+    echo "4. Apache Without SSL"
+    read -p "Select an option [1-4]: " web_config_option
+    case $web_config_option in
+    1)
+        echo "Configure Nginx With SSL..."
+        ;;
+    2)
+        echo "Configure Nginx Without SSL..."
+        ;;
+    3)
+        echo "Configure Apache With SSL..."
+        ;;
+    4)
+        echo "Configure Apache Without SSL..."
+        ;;
+    *)
+        echo "Invalid option for Web Server configuration."
+        ;;
+    esac
+
+    echo "Installing Docker..."
+    curl -sSL https://get.docker.com/ | CHANNEL=stable bash
+    sudo systemctl enable --now docker
+
+    sudo mkdir -p /etc/pterodactyl
+    curl -L -o /usr/local/bin/wings "https://github.com/pterodactyl/wings/releases/latest/download/wings_linux_$([[ "$(uname -m)" == "x86_64" ]] && echo "amd64" || echo "arm64")"
+    sudo chmod u+x /usr/local/bin/wings
+
+    echo "Configure Pterodactyl Node in /etc/pterodactyl/config.yml..."
+    echo "Finnish: Add to /etc/pterodactyl/config.yml under 'configuration' in 'node' section."
+
+    echo "Pterodactyl installation complete!"
     ;;
 3)
     clear
